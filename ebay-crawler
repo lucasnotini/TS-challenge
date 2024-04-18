@@ -1,0 +1,141 @@
+import requests
+from bs4 import BeautifulSoup
+import os
+import json
+import re
+
+def main():
+
+    #### DEFINING INPUTS
+    url = "https://www.ebay.com/sch/garlandcomputer/m.html"
+    #setting a user agent to avoid getting blocked
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"}
+
+    #### CALLING OUR FUNCTIONS  
+    # crawler function -> Use the condition_filter to specify the desired condition. 
+    # if condition_filter == None, all products will be scraped  
+    item_list = crawl_ebay(url, headers, condition_filter = None)
+    # saving json files
+    if item_list:
+        save_json(item_list)
+
+
+############FUNCTIONS###############
+
+#### CREATING A FUNCTION TO CRAWL EBAY
+def crawl_ebay(url, headers, condition_filter = None):
+    """
+    Crawl eBay to extract product information.
+
+    Args:
+        url (str): The URL of the eBay page to crawl.
+        headers (dict): HTTP headers for the request.
+        condition_filter (str, optional): Filter products based on their condition.
+    
+    Returns:
+        list: A list of dictionaries containing product information.
+    """
+    
+    #create a params dict to specify the starting page
+    params = {
+        '_pgn': 1,  # starting page number
+    }
+
+    #create list to store dictionaries with the data of each item
+    item_list = []
+
+    #running a loop to scrape all pages
+    while True:
+
+        #printing the number of the actual page
+        print(f"Scraping page: {params['_pgn']}")
+
+        #making a request and storing the response
+        response = requests.get(url, params=params, headers=headers)
+        #parsing the response to a bsoup object
+        soup = BeautifulSoup(response.text, 'lxml')
+
+        #finding all available items
+        listing_items = soup.find_all("div", class_= "s-item__info clearfix")
+
+        #looping to extract the data from each item
+        for item in listing_items:
+
+            #get the title
+            try:
+                title = item.find("div", class_="s-item__title").text.strip()
+            except:
+                title = None
+            #get the prices
+            try:
+                price = item.find("span", class_="s-item__price").text.strip()
+            except:
+                price = None
+            #get the url 
+            try:
+                product_url = item.find("a", class_="s-item__link")["href"]
+            except:
+                product_url = None
+            #get the condition of the product
+            try:
+                condition = item.find("span", class_="SECONDARY_INFO").text.strip()
+            except:
+                condition = None
+                    
+            # If condition_filter is None or condition matches condition_filter
+            if not condition_filter or (condition and condition.lower() == condition_filter.strip().lower()):
+                # Append a dictionary with each product to our item_list
+                item_list.append({
+                    'title': title,
+                    'product_url': product_url,
+                    'price': price,
+                    'condition': condition
+                })
+
+        #if we have a next page btn
+        if soup.select_one("a.pagination__next"):
+            params['_pgn'] += 1
+        #if we are at the last page
+        else:
+            break
+    
+    #printing the number of scraped items
+    print(f"{len(item_list)} items have been scraped!")  
+
+    return item_list
+
+
+#### CREATING A FUNCTION TO SAVE JSON FILES FROM A LIST OF DICTS WITH ITEMS
+def save_json(item_list):
+    """
+    Saves json files for each dictionary of a list.
+
+    Args:
+        item_list (list): A list of dictionaries with scraped products.
+    """
+    
+    #create a folder to store our data
+    try:
+        os.makedirs("data")
+    except FileExistsError:
+        pass
+    #looping through each dict item in the list
+    for product in item_list:
+
+        #using a regex to extract the item id from the URL
+        item_regex = re.search(r"(?:[ebay]*(?:[\/]|[itm=])|^)([0-9]{9,12})", product['product_url'])
+        #if we get a correspondence
+        if item_regex:
+            item_id = item_regex.group(1)    
+
+            #create json object
+            product_json = json.dumps(product, indent=4)  
+
+            #Writing the json files with the id as the filename
+            filepath = os.path.join("data", f"{item_id}.json")
+            with open(filepath, "w") as file:
+                file.write(product_json)  
+
+    print(f"The scraped items have been saved!")
+
+main()
